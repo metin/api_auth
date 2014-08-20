@@ -516,6 +516,126 @@ describe "ApiAuth" do
         ApiAuth.access_id(@signed_request).should == "1044"
       end
     end
+
+    describe "with Typhoeus" do
+
+      before(:each) do
+        headers = { 'Content-MD5' => "1B2M2Y8AsgTpgAmY7PhCfg==",
+                    'Content-Type' => "text/plain",
+                    'Date' => Time.now.utc.httpdate }
+        @request = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+          :headers => headers,
+          :method => :put)
+        @signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+      end
+
+      it "should return a Typhoeus::Request object after signing it" do
+        ApiAuth.sign!(@request, @access_id, @secret_key).class.to_s.should match("Typhoeus::Request")
+      end
+
+      describe "md5 header" do
+        context "not already provided" do
+          it "should calculate for empty string" do
+            headers = { 'Content-Type' => "text/plain",
+                        'Date' => "Mon, 23 Jan 1984 03:29:56 GMT" }
+            request = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+              :headers => headers,
+              :method => :put)
+            signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
+            signed_request.options[:headers]['Content-MD5'].should == "1B2M2Y8AsgTpgAmY7PhCfg=="
+          end
+
+          it "should calculate for real content" do
+            headers = { 'Content-Type' => "text/plain",
+                        'Date' => "Mon, 23 Jan 1984 03:29:56 GMT" }
+            request = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+              :headers => headers,
+              :method => :put,
+              :body => "hellow\nworld")
+            signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
+            signed_request.options[:headers]['Content-MD5'].should == "G0grublI06013h58g9j8Vw=="
+          end
+        end
+
+        it "should leave the content-md5 alone if provided" do
+          @signed_request.options[:headers]['Content-MD5'].should == "1B2M2Y8AsgTpgAmY7PhCfg=="
+        end
+      end
+
+      it "should sign the request" do
+        @signed_request.options[:headers]['Authorization'].should == "APIAuth 1044:#{hmac(@secret_key, @request)}"
+      end
+
+      it "should sign the request using the generated md5 header" do
+        date = Time.now.utc.httpdate
+        headers1 = { 'Content-MD5' => "1B2M2Y8AsgTpgAmY7PhCfg==",
+                     'Content-Type' => "text/plain",
+                     'Date' => date }
+        request1 = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+                                           :headers => headers1,
+                                           :method => :put)
+        headers2 = { 'Content-Type' => "text/plain",
+                     'Date' => date }
+        request2 = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+                                           :headers => headers2,
+                                           :method => :put)
+
+        ApiAuth.sign!(request1, @access_id, @secret_key)
+        ApiAuth.sign!(request2, @access_id, @secret_key)
+
+        request2.options[:headers]['Authorization'].should == request1.options[:headers]['Authorization']
+      end
+
+      it "should sign the request using the generated Date header" do
+        headers1 = { 'Content-MD5' => "1B2M2Y8AsgTpgAmY7PhCfg==",
+                     'Content-Type' => "text/plain"}
+        request1 = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+                                           :headers => headers1,
+                                           :method => :put)
+        ApiAuth.sign!(request1, @access_id, @secret_key)
+        headers2 = { 'Content-MD5' => "1B2M2Y8AsgTpgAmY7PhCfg==",
+                     'Content-Type' => "text/plain",
+                     'Date' => request1.options[:headers]['DATE'] }
+        request2 = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+                                           :headers => headers2,
+                                           :method => :put)
+
+        ApiAuth.sign!(request2, @access_id, @secret_key)
+
+        request2.options[:headers]['Authorization'].should == request1.options[:headers]['Authorization']
+      end
+
+      it "should authenticate a valid request" do
+        ApiAuth.authentic?(@signed_request, @secret_key).should be_true
+      end
+
+      it "should NOT authenticate a non-valid request" do
+        ApiAuth.authentic?(@signed_request, @secret_key+'j').should be_false
+      end
+
+      it "should NOT authenticate a mismatched content-md5 when body has changed" do
+        headers = { 'Content-Type' => "text/plain",
+                    'Date' => "Mon, 23 Jan 1984 03:29:56 GMT" }
+        request = Typhoeus::Request.new("/resource.xml?foo=bar&bar=foo",
+          :headers => headers,
+          :method => :put,
+          :body => "hello\nworld")
+        signed_request = ApiAuth.sign!(request, @access_id, @secret_key)
+        signed_request.options[:body] = 'goodbye'
+        ApiAuth.authentic?(signed_request, @secret_key).should be_false
+      end
+
+      it "should NOT authenticate an expired request" do
+        @request.options[:headers]['Date'] = 16.minutes.ago.utc.httpdate
+        signed_request = ApiAuth.sign!(@request, @access_id, @secret_key)
+        ApiAuth.authentic?(signed_request, @secret_key).should be_false
+      end
+
+      it "should retrieve the access_id" do
+        ApiAuth.access_id(@signed_request).should == "1044"
+      end
+
+    end
   end
 
 end
