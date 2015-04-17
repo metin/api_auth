@@ -18,7 +18,7 @@ module ApiAuth
       end
 
       def calculated_md5
-        md5_base64digest(@request.options[:body] || '')
+        md5_base64digest(@request.encoded_body || '')
       end
 
       def populate_content_md5
